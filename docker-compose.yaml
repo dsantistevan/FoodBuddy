@@ -1,0 +1,13 @@
+version: "3.9"
+
+services:
+  foodbuddy:
+    build: .
+    container_name: foodbuddy
+    ports:
+      - "8000:8000"
+    # Cache HF models outside container for faster rebuilds
+    volumes:
+      - ./cache:/root/.cache/huggingface
+    environment:
+      - TRANSFORMERS_CACHE=/root/.cache/huggingface

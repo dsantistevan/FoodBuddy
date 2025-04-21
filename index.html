@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Recetas Buddy</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+  </head>
+  <body class="bg-gray-100 min-h-screen flex flex-col items-center p-4">
+    <h1 class="text-3xl font-bold mb-4">Recetas Buddy</h1>
+
+    <!-- Formulario -->
+    <form
+      id="searchForm"
+      class="w-full max-w-xl bg-white rounded-xl shadow p-4 flex flex-col gap-4"
+    >
+      <div>
+        <label class="block font-semibold mb-1" for="query"
+          >¿Qué receta buscas?</label
+        >
+        <input
+          id="query"
+          name="query"
+          type="text"
+          required
+          placeholder="pastel de puerros"
+          class="w-full rounded-lg border px-3 py-2"
+        />
+      </div>
+      <div class="grid grid-cols-2 gap-4">
+        <div>
+          <label class="block font-semibold mb-1" for="lat">Latitud</label>
+          <input
+            id="lat"
+            type="number"
+            step="any"
+            class="w-full rounded-lg border px-3 py-2"
+          />
+        </div>
+        <div>
+          <label class="block font-semibold mb-1" for="lon">Longitud</label>
+          <input
+            id="lon"
+            type="number"
+            step="any"
+            class="w-full rounded-lg border px-3 py-2"
+          />
+        </div>
+      </div>
+      <div>
+        <label class="block font-semibold mb-1" for="k">Resultados</label>
+        <input
+          id="k"
+          type="number"
+          min="1"
+          max="10"
+          value="5"
+          class="w-24 rounded-lg border px-3 py-2"
+        />
+      </div>
+      <button
+        type="submit"
+        class="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-2 rounded-lg"
+      >
+        Buscar
+      </button>
+    </form>
+
+    <!-- Resultados -->
+    <div id="result" class="mt-8 w-full max-w-6xl"></div>
+
+    <script>
+      const form = document.getElementById("searchForm");
+      const resultDiv = document.getElementById("result");
+      const SP_COUNTRIES = {
+        MX: "MEX",
+        ES: "ESP",
+        PE: "PER",
+        CO: "COL",
+        UY: "URY",
+        CL: "CHL",
+        AR: "ARG",
+        VE: "VEN",
+        PR: "PRI",
+        CU: "CUB",
+        BO: "BOL",
+        SV: "SLV",
+        HN: "HND",
+        PY: "PRY",
+        NI: "NIC",
+        DO: "DOM",
+        EC: "ECU",
+        PA: "PAN",
+        GT: "GTM",
+        CR: "CRI",
+      };
+      let userCountry = null;
+
+      // ---- Geolocalización --------------------------------------------------
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(async (pos) => {
+          const { latitude, longitude } = pos.coords;
+          form.lat.value = latitude.toFixed(5);
+          form.lon.value = longitude.toFixed(5);
+          try {
+            const geoRes = await fetch(
+              `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${latitude}&longitude=${longitude}&localityLanguage=es`
+            );
+            const geoJson = await geoRes.json();
+            const code = geoJson.countryCode;
+            if (SP_COUNTRIES[code]) userCountry = SP_COUNTRIES[code];
+          } catch {
+            /* no pasa nada */
+          }
+        });
+      }
+
+      // ---- Helpers ----------------------------------------------------------
+      const parseList = (raw) => {
+        if (!raw) return [];
+        try {
+          const json = JSON.parse(raw.replace(/'/g, '"'));
+          return Array.isArray(json) ? json : [raw];
+        } catch {
+          return [raw];
+        }
+      };
+
+      // ---- Submit -----------------------------------------------------------
+      form.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        resultDiv.innerHTML = '<p class="text-gray-600">Buscando…</p>';
+
+        const payload = {
+          query: form.query.value,
+          lat: parseFloat(form.lat.value),
+          lon: parseFloat(form.lon.value),
+          k: parseInt(form.k.value, 10),
+          pais: userCountry || undefined,
+        };
+
+        try {
+          console.log(payload)
+          const res = await fetch("/recommend", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const data = await res.json();
+          renderResults(data);
+        } catch (err) {
+          resultDiv.innerHTML = `<p class="text-red-600">Error: ${err.message}</p>`;
+        }
+      });
+
+      // ---- Render -----------------------------------------------------------
+      function renderResults({ temperature_c, advice, recommendations }) {
+        let html = `
+        <div class="bg-white shadow rounded-xl p-6 mb-6">
+          <p class="text-xl mb-2"><span class="font-semibold">Temperatura:</span> ${temperature_c.toFixed(
+            1
+          )} °C</p>
+          <p>${advice}</p>
+        </div>
+        <h2 class="text-2xl font-bold mb-4">Recetas encontradas</h2>
+        <div class="space-y-6">
+      `;
+
+        for (const rec of recommendations) {
+          const ingredientes = parseList(rec.Ingredientes);
+          const pasos = parseList(rec.Pasos);
+          html += `
+          <article class="bg-white rounded-xl shadow p-4">
+            <h3 class="text-xl font-semibold mb-2"><a href="${
+              rec.URL
+            }" target="_blank" class="text-emerald-700 hover:underline">${
+            rec.Nombre
+          }</a></h3>
+            <div class="grid lg:grid-cols-2 gap-4 text-sm">
+              <div>
+                <p class="font-semibold">Ingredientes:</p>
+                <ul class="list-disc list-inside pl-2">
+                  ${ingredientes.map((i) => `<li>${i}</li>`).join("")}
+                </ul>
+                <p class="font-semibold mt-2">Pasos:</p>
+                <ol class="list-decimal list-inside pl-2 space-y-1">
+                  ${pasos.map((p) => `<li>${p}</li>`).join("")}
+                </ol>
+              </div>
+              <div class="space-y-1">
+                <p><span class="font-semibold">País:</span> ${
+                  rec.Pais || "—"
+                }</p>
+                <p><span class="font-semibold">Duración:</span> ${
+                  rec.Duracion
+                }</p>
+                <p><span class="font-semibold">Comensales:</span> ${
+                  rec.Comensales
+                }</p>
+                <p><span class="font-semibold">Dificultad:</span> ${
+                  rec.Dificultad
+                }</p>
+                <p><span class="font-semibold">Valoración:</span> ${
+                  rec.Valoracion
+                }</p>
+                <p><span class="font-semibold">Valor nutricional:</span> ${
+                  rec.Valor_nutricional
+                }</p>
+                <p class="text-xs text-gray-500">Similitud: ${rec.similarity.toFixed(
+                  3
+                )}</p>
+              </div>
+            </div>
+          </article>
+        `;
+        }
+        html += "</div>";
+        resultDiv.innerHTML = html;
+      }
+    </script>
+  </body>
+</html>
